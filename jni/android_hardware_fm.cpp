@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2009-2012, The Linux Foundation. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -8,7 +8,7 @@
  *        * Redistributions in binary form must reproduce the above copyright
  *            notice, this list of conditions and the following disclaimer in the
  *            documentation and/or other materials provided with the distribution.
- *        * Neither the name of Code Aurora nor
+ *        * Neither the name of The Linux Foundation nor
  *            the names of its contributors may be used to endorse or promote
  *            products derived from this software without specific prior written
  *            permission.
@@ -56,6 +56,8 @@
 #define TX_RT_LENGTH       63
 #define WAIT_TIMEOUT 200000 /* 200*1000us */
 #define TX_RT_DELIMITER    0x0d
+#define PS_LEN    9
+#define STD_BUF_SIZE 256
 enum search_dir_t {
     SEEK_UP,
     SEEK_DN,
@@ -90,7 +92,6 @@ static jint android_hardware_fmradio_FmReceiverJNI_acquireFdNative
     }
     //Read the driver verions
     err = ioctl(fd, VIDIOC_QUERYCAP, &cap);
-
 
     LOGD("VIDIOC_QUERYCAP returns :%d: version: %d \n", err , cap.version );
 
@@ -385,9 +386,9 @@ static jint android_hardware_fmradio_FmReceiverJNI_getBufferNative
     memset(&v4l2_buf, 0, sizeof (v4l2_buf));
     v4l2_buf.index = index;
     v4l2_buf.type = type;
-    v4l2_buf.length = 128;
+    v4l2_buf.length = STD_BUF_SIZE;
     v4l2_buf.m.userptr = (unsigned long)bool_buffer;
-    err = ioctl(fd,VIDIOC_DQBUF,&v4l2_buf) ;
+    err = ioctl(fd,VIDIOC_DQBUF,&v4l2_buf);
     if(err < 0){
         /* free up the memory in failure case*/
         env->ReleaseBooleanArrayElements(buff, bool_buffer, 0);
@@ -607,33 +608,52 @@ static jint android_hardware_fmradio_FmReceiverJNI_startPSNative
 
     struct v4l2_ext_control ext_ctl;
     struct v4l2_ext_controls v4l2_ctls;
-
+    int l;
     int err = 0;
     jboolean isCopy = false;
+    char *ps_copy = NULL;
+    const char *ps_string = NULL;
 
-    char* ps_string = (char*)env->GetStringUTFChars(buff, &isCopy);
-    if(ps_string == NULL ){
+    ps_string = env->GetStringUTFChars(buff, &isCopy);
+    if (ps_string != NULL) {
+        l = strlen(ps_string);
+        if ((l > 0) && ((l + 1) == PS_LEN)) {
+             ps_copy = (char *)malloc(sizeof(char) * PS_LEN);
+             if (ps_copy != NULL) {
+                 memset(ps_copy, '\0', PS_LEN);
+                 memcpy(ps_copy, ps_string, (PS_LEN - 1));
+             } else {
+                 env->ReleaseStringUTFChars(buff, ps_string);
+                 return FM_JNI_FAILURE;
+             }
+        } else {
+             env->ReleaseStringUTFChars(buff, ps_string);
+             return FM_JNI_FAILURE;
+        }
+    } else {
         return FM_JNI_FAILURE;
     }
 
+    env->ReleaseStringUTFChars(buff, ps_string);
+
     ext_ctl.id     = V4L2_CID_RDS_TX_PS_NAME;
-    ext_ctl.string = ps_string;
-    ext_ctl.size   = count;
+    ext_ctl.string = ps_copy;
+    ext_ctl.size   = PS_LEN;
 
     /* form the ctrls data struct */
     v4l2_ctls.ctrl_class = V4L2_CTRL_CLASS_FM_TX,
     v4l2_ctls.count      = 1,
     v4l2_ctls.controls   = &ext_ctl;
 
-    err = ioctl(fd, VIDIOC_S_EXT_CTRLS, &v4l2_ctls );
-    if(err < 0){
+    err = ioctl(fd, VIDIOC_S_EXT_CTRLS, &v4l2_ctls);
+    if (err < 0) {
         LOGE("VIDIOC_S_EXT_CTRLS for Start PS returned : %d\n", err);
-        env->ReleaseStringUTFChars(buff, ps_string);
+        free(ps_copy);
         return FM_JNI_FAILURE;
     }
 
     LOGD("->android_hardware_fmradio_FmReceiverJNI_startPSNative is SUCCESS\n");
-    env->ReleaseStringUTFChars(buff, ps_string);
+    free(ps_copy);
 
     return FM_JNI_SUCCESS;
 }
@@ -776,5 +796,24 @@ static JNINativeMethod gMethods[] = {
 
 int register_android_hardware_fm_fmradio(JNIEnv* env)
 {
-        return jniRegisterNativeMethods(env, "android/hardware/fmradio/FmReceiverJNI", gMethods, NELEM(gMethods));
+        return jniRegisterNativeMethods(env, "qcom/fmradio/FmReceiverJNI", gMethods, NELEM(gMethods));
 }
+
+jint JNI_OnLoad(JavaVM *jvm, void *reserved)
+{
+  JNIEnv *e;
+  int status;
+   LOGE("FM : loading QCOMM FM-JNI\n");
+  
+   if(jvm->GetEnv((void **)&e, JNI_VERSION_1_6)) {
+       LOGE("JNI version mismatch error");
+      return JNI_ERR;
+   }
+
+   if ((status = register_android_hardware_fm_fmradio(e)) < 0) {
+       LOGE("jni adapter service registration failure, status: %d", status);
+      return JNI_ERR;
+   }
+   return JNI_VERSION_1_6;
+}
+
