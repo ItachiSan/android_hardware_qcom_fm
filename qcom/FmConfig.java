@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009-2011, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2009-2011, The Linux Foundation. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -8,7 +8,7 @@
  *    * Redistributions in binary form must reproduce the above copyright
  *      notice, this list of conditions and the following disclaimer in the
  *      documentation and/or other materials provided with the distribution.
- *    * Neither the name of Code Aurora nor
+ *    * Neither the name of The Linux Foundation nor
  *      the names of its contributors may be used to endorse or promote
  *      products derived from this software without specific prior written
  *      permission.
@@ -71,7 +71,6 @@ public class FmConfig {
      * FmTransceiver.FM_CHSPACE_50_KHZ
      */
     private int mChSpacing;
-
     /**
      * RDS standard type
      *
@@ -145,12 +144,11 @@ public class FmConfig {
      * This method call v4l2 private controls to set regional settings for the
      * FM core
      */
-    protected static boolean fmConfigure (int fd, FmConfig configSettings) {
+    protected static boolean fmConfigure (final int fd, final FmConfig configSettings) {
 
         int re;
 
         Log.v (TAG, "In fmConfigure");
-
 	re = FmReceiverJNI.setControlNative (fd, V4L2_CID_PRIVATE_TAVARUA_EMPHASIS, configSettings.getEmphasis());
         re = FmReceiverJNI.setControlNative (fd, V4L2_CID_PRIVATE_TAVARUA_RDS_STD, configSettings.getRdsStd() );
         re = FmReceiverJNI.setControlNative (fd, V4L2_CID_PRIVATE_TAVARUA_SPACING, configSettings.getChSpacing() );

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2009-2013, The Linux Foundation. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -8,7 +8,7 @@
  *    * Redistributions in binary form must reproduce the above copyright
  *      notice, this list of conditions and the following disclaimer in the
  *      documentation and/or other materials provided with the distribution.
- *    * Neither the name of Code Aurora nor
+ *    * Neither the name of The Linux Foundation nor
  *      the names of its contributors may be used to endorse or promote
  *      products derived from this software without specific prior written
  *      permission.
@@ -146,17 +146,22 @@ public class FmTransmitter extends FmTransceiver
     *
     */
    public boolean enable (FmConfig configSettings){
-      boolean status = true;
+      boolean status = false;
 
       int state = getFMState();
       if (state == FMState_Tx_Turned_On) {
           Log.d(TAG, "enable: FM Tx already turned On and running");
           return status;
-      } else if (state == subPwrLevel_FMTurning_Off) {
+      }else if (state == subPwrLevel_FMTurning_Off) {
           Log.v(TAG, "FM is in the process of turning off.Pls wait for sometime.");
           return status;
-      } else if(state == subPwrLevel_FMTx_Starting) {
+      }else if((state == subPwrLevel_FMTx_Starting)
+                ||(state == subPwrLevel_FMRx_Starting)) {
           Log.v(TAG, "FM is in the process of turning On.Pls wait for sometime.");
+          return status;
+      }else if((state == FMState_Srch_InProg)
+                ||(state == FMState_Rx_Turned_On)) {
+          Log.v(TAG, "FM Rx is turned on");
           return status;
       }
       setFMPowerState(subPwrLevel_FMTx_Starting);
@@ -298,8 +303,16 @@ public class FmTransmitter extends FmTransceiver
    */
    public boolean reset(){
       boolean status = false;
+      int state = getFMState();
 
+      if(state == FMState_Turned_Off) {
+         Log.d(TAG, "FM already turned Off.");
+         return false;
+      }
+      setFMPowerState(FMState_Turned_Off);
+      Log.v(TAG, "reset: NEW-STATE : FMState_Turned_Off");
       status = unregisterTransmitClient();
+      release("/dev/radio0");
       return status;
    }
 

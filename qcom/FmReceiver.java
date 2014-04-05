@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009,2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2009,2012-2013, The Linux Foundation. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -8,7 +8,7 @@
  *        * Redistributions in binary form must reproduce the above copyright
  *            notice, this list of conditions and the following disclaimer in the
  *            documentation and/or other materials provided with the distribution.
- *        * Neither the name of Code Aurora nor
+ *        * Neither the name of The Linux Foundation nor
  *            the names of its contributors may be used to endorse or promote
  *            products derived from this software without specific prior written
  *            permission.
@@ -40,8 +40,8 @@ public class FmReceiver extends FmTransceiver
 
    public static int mSearchState = 0;
 
-   static final int STD_BUF_SIZE = 128;
-
+   static final int STD_BUF_SIZE = 256;
+   static final int GRP_3A = 64;
    private static final String TAG = "FMRadio";
 
    /**
@@ -281,6 +281,23 @@ public class FmReceiver extends FmTransceiver
    private static final int FM_RX_RSSI_LEVEL_VERY_STRONG = -90;
 
    /**
+     * BUF_TYPE
+     */
+   private static final int BUF_ERT = 12;
+   private static final int BUF_RTPLUS = 11;
+
+   private static final int LEN_IND = 0;
+   private static final int RT_OR_ERT_IND = 1;
+   private static final int ENCODE_TYPE_IND = 1;
+   private static final int ERT_DIR_IND = 2;
+
+  /**
+    * Search Algo type
+    */
+   private static final int SEARCH_MPXDCC = 0;
+   private static final int SEARCH_SINR_INT = 1;
+
+   /**
     * Constructor for the receiver Object
     */
    public FmReceiver(){
@@ -416,13 +433,15 @@ public class FmReceiver extends FmTransceiver
       if (state == FMState_Rx_Turned_On || state == FMState_Srch_InProg) {
          Log.d(TAG, "enable: FM already turned On and running");
          return status;
-      }
-      else if (state == subPwrLevel_FMTurning_Off) {
+      }else if (state == subPwrLevel_FMTurning_Off) {
          Log.v(TAG, "FM is in the process of turning off.Pls wait for sometime.");
          return status;
-      }
-      else if (state == subPwrLevel_FMRx_Starting) {
+      }else if (state == subPwrLevel_FMRx_Starting) {
          Log.v(TAG, "FM is in the process of turning On.Pls wait for sometime.");
+         return status;
+      }else if ((state == FMState_Tx_Turned_On)
+                || (state == subPwrLevel_FMTx_Starting)) {
+         Log.v(TAG, "FM Tx is turned on or in the process of turning on.");
          return status;
       }
 
@@ -721,14 +740,14 @@ public class FmReceiver extends FmTransceiver
                                   int direction){
 
       int state = getFMState();
+      boolean bStatus = true;
+      int re;
 
       /* Check current state of FM device */
       if (state == FMState_Turned_Off || state == FMState_Srch_InProg) {
           Log.d(TAG, "searchStations: Device currently busy in executing another command.");
           return false;
       }
-
-      boolean bStatus = true;
 
       Log.d (TAG, "Basic search...");
 
@@ -755,21 +774,27 @@ public class FmReceiver extends FmTransceiver
       if (bStatus)
       {
          Log.d (TAG, "searchStations: mode " + mode + "direction:  " + direction);
-         mControl.searchStations(sFd, mode, dwellPeriod, direction, 0, 0);
-
-         state = getFMState();
-         if (state == FMState_Turned_Off) {
-            Log.d(TAG, "searchStations: CURRENT-STATE : FMState_Off (unexpected)");
-            return false;
-         }
 
          if (mode == FM_RX_SRCH_MODE_SEEK)
-            setSearchState(subSrchLevel_SeekInPrg);
+             setSearchState(subSrchLevel_SeekInPrg);
          else if (mode == FM_RX_SRCH_MODE_SCAN)
-            setSearchState(subSrchLevel_ScanInProg);
+             setSearchState(subSrchLevel_ScanInProg);
          Log.v(TAG, "searchStations: CURRENT-STATE : FMRxOn ---> NEW-STATE : SearchInProg");
+
+         re = mControl.searchStations(sFd, mode, dwellPeriod, direction, 0, 0);
+         if (re != 0) {
+             Log.e(TAG, "search station failed");
+             if (getFMState() == FMState_Srch_InProg)
+                 setSearchState(subSrchLevel_SrchComplete);
+             return false;
+         }
+         state = getFMState();
+         if (state == FMState_Turned_Off) {
+             Log.d(TAG, "searchStations: CURRENT-STATE : FMState_Off (unexpected)");
+             return false;
+         }
       }
-      return true;
+      return bStatus;
    }
 
    /*==============================================================
@@ -901,6 +926,8 @@ public class FmReceiver extends FmTransceiver
                                   int pi) {
       boolean bStatus = true;
       int state = getFMState();
+      int re;
+
       /* Check current state of FM device */
       if (state == FMState_Turned_Off || state == FMState_Srch_InProg) {
           Log.d(TAG, "searchStations: Device currently busy in executing another command.");
@@ -939,10 +966,16 @@ public class FmReceiver extends FmTransceiver
          Log.d (TAG, "searchStations: direction " + direction);
          Log.d (TAG, "searchStations: pty " + pty);
          Log.d (TAG, "searchStations: pi " + pi);
-         mControl.searchStations(sFd, mode, dwellPeriod, direction, pty, pi);
          setSearchState(subSrchLevel_ScanInProg);
+         re = mControl.searchStations(sFd, mode, dwellPeriod, direction, pty, pi);
+         if (re != 0) {
+             Log.e(TAG, "scan station failed");
+             if (getFMState() == FMState_Srch_InProg)
+                 setSearchState(subSrchLevel_SrchComplete);
+             bStatus = false;
+         }
       }
-      return true;
+      return bStatus;
    }
 
    /*==============================================================
@@ -1031,14 +1064,14 @@ public class FmReceiver extends FmTransceiver
                                      int pty){
 
       int state = getFMState();
+      boolean bStatus = true;
+      int re = 0;
+
       /* Check current state of FM device */
       if (state == FMState_Turned_Off || state == FMState_Srch_InProg) {
           Log.d(TAG, "searchStationList: Device currently busy in executing another command.");
           return false;
       }
-
-      boolean bStatus = true;
-      int re=0;
 
       Log.d (TAG, "searchStations: mode " + mode);
       Log.d (TAG, "searchStations: direction " + direction);
@@ -1067,21 +1100,25 @@ public class FmReceiver extends FmTransceiver
 
       if (bStatus)
       {
-         if ( (mode == FM_RX_SRCHLIST_MODE_STRONGEST) || (mode == FM_RX_SRCHLIST_MODE_WEAKEST) ) {
-            mode = (mode == FM_RX_SRCHLIST_MODE_STRONGEST)? FM_RX_SRCHLIST_MODE_STRONG: FM_RX_SRCHLIST_MODE_WEAK;
-           re = mControl.searchStationList(sFd, mode, 0, direction, pty);
-         }
-	 else
-           re = mControl.searchStationList(sFd, mode, maximumStations, direction, pty);
-
          setSearchState(subSrchLevel_SrchListInProg);
          Log.v(TAG, "searchStationList: CURRENT-STATE : FMRxOn ---> NEW-STATE : SearchInProg");
+         if ((mode == FM_RX_SRCHLIST_MODE_STRONGEST) || (mode == FM_RX_SRCHLIST_MODE_WEAKEST)) {
+             mode = (mode == FM_RX_SRCHLIST_MODE_STRONGEST)?
+                               FM_RX_SRCHLIST_MODE_STRONG: FM_RX_SRCHLIST_MODE_WEAK;
+            re = mControl.searchStationList(sFd, mode, 0, direction, pty);
+         }
+         else
+            re = mControl.searchStationList(sFd, mode, maximumStations, direction, pty);
+
+         if (re != 0) {
+             Log.e(TAG, "search station list failed");
+             if (getFMState() == FMState_Srch_InProg)
+                 setSearchState(subSrchLevel_SrchComplete);
+             bStatus =  false;
+         }
       }
 
-      if (re == 0)
-        return true;
-
-      return false;
+      return bStatus;
    }
 
 
@@ -1424,6 +1461,73 @@ public class FmReceiver extends FmTransceiver
       return mRdsData;
    }
 
+   public FmRxRdsData getRTPlusInfo() {
+      byte []rt_plus = new byte[STD_BUF_SIZE];
+      int bytes_read;
+      String rt = "";
+      int rt_len;
+      int i, j = 2;
+      byte tag_code, tag_len, tag_start_pos;
+
+      bytes_read = FmReceiverJNI.getBufferNative(sFd, rt_plus, BUF_RTPLUS);
+      if (bytes_read > 0) {
+          if (rt_plus[RT_OR_ERT_IND] == 0)
+              rt = mRdsData.getRadioText();
+          else
+              rt = mRdsData.getERadioText();
+          if ((rt != "") && (rt != null)) {
+              rt_len = rt.length();
+              mRdsData.setTagNums(0);
+              for (i = 1; (i <= 2) && (j < rt_plus[LEN_IND]); i++) {
+                  tag_code = rt_plus[j++];
+                  tag_start_pos = rt_plus[j++];
+                  tag_len = rt_plus[j++];
+                  if (((tag_len + tag_start_pos) <= rt_len) && (tag_code > 0)) {
+                      mRdsData.setTagValue(rt.substring(tag_start_pos,
+                                            (tag_len + tag_start_pos)), i);
+                      mRdsData.setTagCode(tag_code, i);
+                  }
+              }
+          } else {
+              mRdsData.setTagNums(0);
+          }
+      } else {
+              mRdsData.setTagNums(0);
+      }
+      return mRdsData;
+   }
+
+   public FmRxRdsData getERTInfo() {
+      byte [] raw_ert = new byte[STD_BUF_SIZE];
+      byte [] ert_text;
+      int i;
+      String s = "";
+      String encoding_type = "UCS-2";
+      int bytes_read;
+
+      bytes_read = FmReceiverJNI.getBufferNative(sFd, raw_ert, BUF_ERT);
+      if (bytes_read > 0) {
+          ert_text = new byte[raw_ert[LEN_IND]];
+          for(i = 3; (i - 3) < raw_ert[LEN_IND]; i++) {
+              ert_text[i - 3] = raw_ert[i];
+          }
+          if (raw_ert[ENCODE_TYPE_IND] == 1)
+              encoding_type = "UTF-8";
+          try {
+               s = new String (ert_text, encoding_type);
+          } catch (Exception e) {
+               e.printStackTrace();
+          }
+          mRdsData.setERadioText(s);
+          if (raw_ert[ERT_DIR_IND] == 0)
+              mRdsData.setFormatDir(false);
+          else
+              mRdsData.setFormatDir(true);
+          Log.d(TAG, "eRT: " + s + "dir: " +raw_ert[ERT_DIR_IND]);
+      }
+      return mRdsData;
+   }
+
    /*==============================================================
    FUNCTION:  getAFInfo
    ==============================================================*/
@@ -1649,6 +1753,152 @@ public class FmReceiver extends FmTransceiver
      return threshold;
    }
 
+   public int getAFJumpRmssiTh() {
+      int state = getFMState();
+      /* Check current state of FM device */
+      if ((state == FMState_Turned_Off) || (state == FMState_Srch_InProg)) {
+          Log.d(TAG, "getAFJumpThreshold: Device currently busy in executing another command.");
+          return ERROR;
+      }
+      return mControl.getAFJumpRmssiTh(sFd);
+   }
+
+   public boolean setAFJumpRmssiTh(int th) {
+      int state = getFMState();
+      /* Check current state of FM device */
+      if ((state == FMState_Turned_Off) || (state == FMState_Srch_InProg)) {
+          Log.d(TAG, "setAFJumpThreshold: Device currently busy in executing another command.");
+          return false;
+      }
+      return mControl.setAFJumpRmssiTh(sFd, th);
+   }
+
+   public int getAFJumpRmssiSamples() {
+      int state = getFMState();
+      /* Check current state of FM device */
+      if ((state == FMState_Turned_Off) || (state == FMState_Srch_InProg)) {
+          Log.d(TAG, "getAFJumpRmssiSamples: Device currently busy in executing another command.");
+          return ERROR;
+      }
+      return mControl.getAFJumpRmssiSamples(sFd);
+   }
+
+   public boolean setAFJumpRmssiSamples(int samples) {
+      int state = getFMState();
+      /* Check current state of FM device */
+      if ((state == FMState_Turned_Off) || (state == FMState_Srch_InProg)) {
+          Log.d(TAG, "setAFJumpRmssiSamples: Device currently busy in executing another command.");
+          return false;
+      }
+      return mControl.setAFJumpRmssiSamples(sFd, samples);
+   }
+
+   public int getGdChRmssiTh() {
+      int state = getFMState();
+      /* Check current state of FM device */
+      if ((state == FMState_Turned_Off) || (state == FMState_Srch_InProg)) {
+          Log.d(TAG, "getGdChRmssiTh: Device currently busy in executing another command.");
+          return ERROR;
+      }
+      return mControl.getGdChRmssiTh(sFd);
+   }
+
+   public boolean setGdChRmssiTh(int th) {
+      int state = getFMState();
+      /* Check current state of FM device */
+      if ((state == FMState_Turned_Off) || (state == FMState_Srch_InProg)) {
+          Log.d(TAG, "setGdChRmssiTh: Device currently busy in executing another command.");
+          return false;
+      }
+      return mControl.setGdChRmssiTh(sFd, th);
+   }
+
+   public int getSearchAlgoType() {
+      int state = getFMState();
+      if ((state == FMState_Turned_Off) || (state == FMState_Srch_InProg)) {
+          Log.d(TAG, "getSearchAlgoType: Device currently busy in executing another command.");
+          return Integer.MAX_VALUE;
+      }
+      return mControl.getSearchAlgoType(sFd);
+   }
+
+   public boolean setSearchAlgoType(int searchType) {
+      int state = getFMState();
+      if ((state == FMState_Turned_Off) || (state == FMState_Srch_InProg)) {
+          Log.d(TAG, "setSearchAlgoType: Device currently busy in executing another command.");
+          return false;
+      }
+      if((searchType != SEARCH_MPXDCC) && (searchType != SEARCH_SINR_INT)) {
+          Log.d(TAG, "Search Algo is invalid");
+          return false;
+      }else {
+          return mControl.setSearchAlgoType(sFd, searchType);
+      }
+   }
+
+   public int getSinrFirstStage() {
+      int state = getFMState();
+      if ((state == FMState_Turned_Off) || (state == FMState_Srch_InProg)) {
+          Log.d(TAG, "getSinrFirstStage: Device currently busy in executing another command.");
+          return Integer.MAX_VALUE;
+      }
+      return mControl.getSinrFirstStage(sFd);
+   }
+
+   public boolean setSinrFirstStage(int sinr) {
+      int state = getFMState();
+      if ((state == FMState_Turned_Off) || (state == FMState_Srch_InProg)) {
+          Log.d(TAG, "setSinrFirstStage: Device currently busy in executing another command.");
+          return false;
+      }
+      return mControl.setSinrFirstStage(sFd, sinr);
+   }
+
+   public int getRmssiFirstStage() {
+      int state = getFMState();
+      if ((state == FMState_Turned_Off) || (state == FMState_Srch_InProg)) {
+          Log.d(TAG, "getRmssiFirstStage: Device currently busy in executing another command.");
+          return Integer.MAX_VALUE;
+      }
+      return mControl.getRmssiFirstStage(sFd);
+   }
+
+   public boolean setRmssiFirstStage(int rmssi) {
+      int state = getFMState();
+      if ((state == FMState_Turned_Off) || (state == FMState_Srch_InProg)) {
+          Log.d(TAG, "setRmssiFirstStage: Device currently busy in executing another command.");
+          return false;
+      }
+      return mControl.setRmssiFirstStage(sFd, rmssi);
+   }
+
+   public int getCFOMeanTh() {
+      int state = getFMState();
+      if ((state == FMState_Turned_Off) || (state == FMState_Srch_InProg)) {
+          Log.d(TAG, "getCF0Th12: Device currently busy in executing another command.");
+          return Integer.MAX_VALUE;
+      }
+      return mControl.getCFOMeanTh(sFd);
+   }
+
+   public boolean setCFOMeanTh(int th) {
+      int state = getFMState();
+      if ((state == FMState_Turned_Off) || (state == FMState_Srch_InProg)) {
+          Log.d(TAG, "setRmssiFirstStage: Device currently busy in executing another command.");
+          return false;
+      }
+      return mControl.setCFOMeanTh(sFd, th);
+   }
+
+   public boolean setPSRxRepeatCount(int count) {
+      int state = getFMState();
+      /* Check current state of FM device */
+      if (state == FMState_Turned_Off){
+          Log.d(TAG, "setRxRepeatcount failed");
+          return false;
+      }
+      return mControl.setPSRxRepeatCount(sFd, count);
+   }
 
    /*==============================================================
    FUNCTION:  setRdsGroupOptions
@@ -1725,6 +1975,10 @@ public class FmReceiver extends FmTransceiver
 
    }
 
+   public boolean setRawRdsGrpMask()
+   {
+      return super.setRDSGrpMask(GRP_3A);
+   }
    /*==============================================================
    FUNCTION:  registerRdsGroupProcessing
    ==============================================================*/
@@ -2082,9 +2336,13 @@ public class FmReceiver extends FmTransceiver
    *
    *    <p>
    */
-   public void setOnChannelThreshold(int data)
+   public boolean setOnChannelThreshold(int data)
    {
       int re =  mControl.setOnChannelThreshold(sFd, data);
+      if (re < 0)
+          return false;
+      else
+          return true;
    }
 
 /*==============================================================
@@ -2114,9 +2372,13 @@ public class FmReceiver extends FmTransceiver
    *
    *    <p>
    */
-   public void setOffChannelThreshold(int data)
+   public boolean setOffChannelThreshold(int data)
    {
       int re =  mControl.setOffChannelThreshold(sFd, data);
+      if (re < 0)
+          return false;
+      else
+          return true;
    }
 /*==============================================================
    FUNCTION:  getOffChannelThreshold
@@ -2162,9 +2424,13 @@ public class FmReceiver extends FmTransceiver
    *
    *    <p>
    */
-   public void setSINRThreshold(int data)
+   public boolean setSINRThreshold(int data)
    {
       int re =  mControl.setSINRThreshold(sFd, data);
+      if (re < 0)
+          return false;
+      else
+          return true;
    }
 
 /*==============================================================
@@ -2194,9 +2460,13 @@ public class FmReceiver extends FmTransceiver
    *
    *    <p>
    */
-   public void setSINRsamples(int data)
+   public boolean setSINRsamples(int data)
    {
       int re =  mControl.setSINRsamples(sFd, data);
+      if (re < 0)
+          return false;
+      else
+          return true;
    }
 
 /*==============================================================
