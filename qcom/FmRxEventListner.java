@@ -26,9 +26,9 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package android.hardware.fmradio;
-import android.hardware.fmradio.FmReceiver;
-import android.hardware.fmradio.FmTransceiver;
+package qcom.fmradio;
+import qcom.fmradio.FmReceiver;
+import qcom.fmradio.FmTransceiver;
 import java.util.Arrays;
 import android.util.Log;
 

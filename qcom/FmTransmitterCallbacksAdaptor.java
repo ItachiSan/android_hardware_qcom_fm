@@ -26,7 +26,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package android.hardware.fmradio;
+package qcom.fmradio;
 
     /**
     * @hide

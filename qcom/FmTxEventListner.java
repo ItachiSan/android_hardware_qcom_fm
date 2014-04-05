@@ -26,10 +26,10 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package android.hardware.fmradio;
+package qcom.fmradio;
 
 import android.util.Log;
-import android.hardware.fmradio.FmTransceiver;
+import qcom.fmradio.FmTransceiver;
 
 class FmTxEventListner {
 
